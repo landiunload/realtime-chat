@@ -1,0 +1,35 @@
+# Локальное окружение: PostgreSQL и приложение чата
+services:
+  realtime-chat-database:
+    image: postgres:17-alpine
+    container_name: realtime-chat-database
+    environment:
+      POSTGRES_DB: realtime_chat
+      POSTGRES_USER: realtime_chat_user
+      POSTGRES_PASSWORD: local_development_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - realtime-chat-database-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username=realtime_chat_user --dbname=realtime_chat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  realtime-chat-web-application:
+    build:
+      context: .
+      dockerfile: src/RealtimeChat.WebApplication/Dockerfile
+    container_name: realtime-chat-web-application
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__ChatDatabase: "Host=realtime-chat-database;Port=5432;Database=realtime_chat;Username=realtime_chat_user;Password=local_development_password"
+    ports:
+      - "8081:8080"
+    depends_on:
+      realtime-chat-database:
+        condition: service_healthy
+
+volumes:
+  realtime-chat-database-volume:

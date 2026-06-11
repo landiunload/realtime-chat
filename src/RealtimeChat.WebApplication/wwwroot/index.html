@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Чат реального времени</title>
+    <style>
+        /* Минимальный клиент для демонстрации работы хаба */
+        body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+        #messages-list { list-style: none; padding: 0; min-height: 280px; border: 1px solid #ccc; border-radius: 8px; padding: 12px; }
+        #messages-list li { margin-bottom: 6px; }
+        .message-meta { color: #888; font-size: 0.8rem; }
+        form { display: flex; gap: 8px; margin-top: 8px; }
+        input { flex: 1; padding: 8px; }
+    </style>
+</head>
+<body>
+    <h1>Чат реального времени</h1>
+    <div>
+        <input id="participant-name-input" placeholder="Ваше имя">
+        <input id="room-name-input" placeholder="Комната" value="general">
+        <button id="join-room-button">Войти</button>
+    </div>
+    <ul id="messages-list"></ul>
+    <form id="send-message-form">
+        <input id="message-text-input" placeholder="Сообщение" autocomplete="off" disabled>
+        <button type="submit" disabled id="send-message-button">Отправить</button>
+    </form>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
+    <script>
+        // Клиент SignalR: подключение, вход в комнату, отправка и приём сообщений
+        const hubConnection = new signalR.HubConnectionBuilder()
+            .withUrl("/hubs/chat")
+            .withAutomaticReconnect()
+            .build();
+
+        const messagesList = document.getElementById("messages-list");
+
+        function appendMessageToList(senderName, text, sentAtUtc) {
+            const listItem = document.createElement("li");
+            const sentAtLocalTime = new Date(sentAtUtc).toLocaleTimeString();
+            listItem.innerHTML = `<span class="message-meta">[${sentAtLocalTime}] ${senderName}:</span> ${text}`;
+            messagesList.appendChild(listItem);
+            listItem.scrollIntoView();
+        }
+
+        hubConnection.on("ReceiveMessage", (messageIdentifier, senderName, text, sentAtUtc) =>
+            appendMessageToList(senderName, text, sentAtUtc));
+
+        hubConnection.on("ParticipantJoined", (participantName) =>
+            appendMessageToList("система", `${participantName} вошёл в комнату`, new Date().toISOString()));
+
+        document.getElementById("join-room-button").addEventListener("click", async () => {
+            const joinRoomButton = document.getElementById("join-room-button");
+            const participantName = document.getElementById("participant-name-input").value.trim();
+            const roomName = document.getElementById("room-name-input").value.trim();
+
+            if (!participantName || !roomName) {
+                appendMessageToList("система", "Введите имя и название комнаты", new Date().toISOString());
+                return;
+            }
+
+            // Блокируем кнопку на время подключения: повторный клик во время start()
+            // привёл бы к ошибке «соединение уже запускается»
+            joinRoomButton.disabled = true;
+            try {
+                if (hubConnection.state === signalR.HubConnectionState.Disconnected) {
+                    await hubConnection.start();
+                }
+                await hubConnection.invoke("JoinRoom", roomName, participantName);
+
+                document.getElementById("message-text-input").disabled = false;
+                document.getElementById("send-message-button").disabled = false;
+            } catch (joinRoomError) {
+                console.error("Не удалось войти в комнату:", joinRoomError);
+                appendMessageToList("система", "Не удалось подключиться: " + joinRoomError.message, new Date().toISOString());
+                joinRoomButton.disabled = false;
+            }
+        });
+
+        document.getElementById("send-message-form").addEventListener("submit", async (submitEvent) => {
+            submitEvent.preventDefault();
+            const messageTextInput = document.getElementById("message-text-input");
+            const participantName = document.getElementById("participant-name-input").value.trim();
+            const roomName = document.getElementById("room-name-input").value.trim();
+
+            if (!messageTextInput.value.trim()) { return; }
+
+            try {
+                await hubConnection.invoke("SendMessage", roomName, participantName, messageTextInput.value);
+                messageTextInput.value = "";
+            } catch (sendMessageError) {
+                console.error("Не удалось отправить сообщение:", sendMessageError);
+                appendMessageToList("система", "Сообщение не отправлено: " + sendMessageError.message, new Date().toISOString());
+            }
+        });
+    </script>
+</body>
+</html>
