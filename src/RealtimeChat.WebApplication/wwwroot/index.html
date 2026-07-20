@@ -513,6 +513,13 @@
     hubConnection.on("ReceiveMessage", (_, senderName, text, sentAtUtc) =>
         appendMessage(senderName, text, sentAtUtc));
 
+    // История комнаты приходит одним пакетом при входе
+    hubConnection.on("ReceiveMessageHistory", (recentMessages) => {
+        for (const recentMessage of recentMessages) {
+            appendMessage(recentMessage.senderName, recentMessage.text, recentMessage.sentAtUtc);
+        }
+    });
+
     hubConnection.on("ParticipantJoined", (participantName) =>
         appendSystem(`${participantName} вошёл в комнату`));
 

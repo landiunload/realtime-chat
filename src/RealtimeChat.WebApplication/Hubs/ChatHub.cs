@@ -1,13 +1,28 @@
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.SignalR;
 using RealtimeChat.WebApplication.Features.Messages;
 
 namespace RealtimeChat.WebApplication.Hubs;
+
+/// <summary>
+/// Сообщение в том виде, в каком оно уходит клиенту.
+/// Имена полей в JSON закреплены явно, чтобы клиент не зависел
+/// от политики именования сериализатора.
+/// </summary>
+public sealed record ChatMessageSnapshot(
+    [property: JsonPropertyName("identifier")] Guid Identifier,
+    [property: JsonPropertyName("senderName")] string SenderName,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("sentAtUtc")] DateTimeOffset SentAtUtc);
 
 /// <summary>Контракт клиентских методов: что сервер может вызвать у подключённого клиента.</summary>
 public interface IChatClient
 {
     /// <summary>Доставляет клиенту новое сообщение.</summary>
     Task ReceiveMessage(Guid messageIdentifier, string senderName, string text, DateTimeOffset sentAtUtc);
+
+    /// <summary>Доставляет клиенту историю комнаты одним пакетом, в хронологическом порядке.</summary>
+    Task ReceiveMessageHistory(IReadOnlyList<ChatMessageSnapshot> recentMessages);
 
     /// <summary>Сообщает клиенту о входе участника в комнату.</summary>
     Task ParticipantJoined(string participantName);
@@ -41,13 +56,22 @@ public sealed class ChatHub(
             RecentMessagesCountToSendOnJoin,
             Context.ConnectionAborted);
 
-        foreach (var recentMessage in recentMessages)
+        // История уходит одним вызовом: раньше на каждое из 50 сообщений
+        // приходился отдельный последовательный round-trip к клиенту.
+        if (recentMessages.Count > 0)
         {
-            await Clients.Caller.ReceiveMessage(
-                recentMessage.Identifier,
-                recentMessage.SenderName,
-                recentMessage.Text,
-                recentMessage.SentAtUtc);
+            var messageHistory = new ChatMessageSnapshot[recentMessages.Count];
+            for (var messageIndex = 0; messageIndex < recentMessages.Count; ++messageIndex)
+            {
+                var recentMessage = recentMessages[messageIndex];
+                messageHistory[messageIndex] = new ChatMessageSnapshot(
+                    recentMessage.Identifier,
+                    recentMessage.SenderName,
+                    recentMessage.Text,
+                    recentMessage.SentAtUtc);
+            }
+
+            await Clients.Caller.ReceiveMessageHistory(messageHistory);
         }
 
         await Clients.OthersInGroup(roomName).ParticipantJoined(participantName);
