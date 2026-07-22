@@ -1,0 +1,31 @@
+# Всё, что не нужно образу. Без этого файла в контекст сборки уезжают
+# каталоги bin/ и obj/ хост-машины, а `COPY src/ src/` укладывает их поверх
+# результата контейнерного restore. Итог: publish --no-restore читает чужой
+# project.assets.json с путями вида C:\Users\...\.nuget и падает с NETSDK1064
+# «Package ... was not found», хотя restore внутри образа прошёл успешно.
+
+# Артефакты сборки .NET
+**/bin/
+**/obj/
+**/*.user
+**/TestResults/
+coverage/
+
+# История и настройки репозитория
+.git/
+.gitignore
+.github/
+
+# Каталоги сред разработки
+.vs/
+.vscode/
+.idea/
+
+# Тесты в образ не попадают
+tests/
+
+# Файлы самой контейнеризации и документация
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+README.md
