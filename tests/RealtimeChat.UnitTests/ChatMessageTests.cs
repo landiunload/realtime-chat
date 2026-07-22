@@ -35,4 +35,39 @@ public sealed class ChatMessageTests
         // Действие и проверка
         Assert.Throws<ArgumentException>(() => ChatMessage.Create("general", "Андрей", textExceedingMaximumLength));
     }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Create_ПустоеНазваниеКомнаты_ВыбрасываетИсключение(string emptyRoomName)
+    {
+        Assert.ThrowsAny<ArgumentException>(() => ChatMessage.Create(emptyRoomName, "Андрей", "Привет!"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Create_ПустоеИмяОтправителя_ВыбрасываетИсключение(string emptySenderName)
+    {
+        Assert.ThrowsAny<ArgumentException>(() => ChatMessage.Create("general", emptySenderName, "Привет!"));
+    }
+
+    [Fact]
+    public void Create_ТекстРовноМаксимальнойДлины_СоздаётСообщение()
+    {
+        // Граничное значение: ровно предел допустим, проверка отсекает только «больше»
+        var textAtMaximumLength = new string('а', ChatMessage.MaximumTextLength);
+
+        var createdMessage = ChatMessage.Create("general", "Андрей", textAtMaximumLength);
+
+        Assert.Equal(ChatMessage.MaximumTextLength, createdMessage.Text.Length);
+    }
+
+    [Fact]
+    public void Create_НазваниеКомнатыСПробелами_ОбрезаетПробелы()
+    {
+        var createdMessage = ChatMessage.Create("  general  ", "Андрей", "Привет!");
+
+        Assert.Equal("general", createdMessage.RoomName);
+    }
 }

@@ -16,12 +16,14 @@ public sealed class ChatHubTests
     private readonly IChatMessageStore _messageStoreSubstitute = Substitute.For<IChatMessageStore>();
     private readonly IChatClient _callerSubstitute = Substitute.For<IChatClient>();
     private readonly IChatClient _othersInGroupSubstitute = Substitute.For<IChatClient>();
+    private readonly IChatClient _groupSubstitute = Substitute.For<IChatClient>();
 
     private ChatHub CreateHubUnderTest()
     {
         var hubCallerClients = Substitute.For<IHubCallerClients<IChatClient>>();
         hubCallerClients.Caller.Returns(_callerSubstitute);
         hubCallerClients.OthersInGroup(Arg.Any<string>()).Returns(_othersInGroupSubstitute);
+        hubCallerClients.Group(Arg.Any<string>()).Returns(_groupSubstitute);
 
         var hubCallerContext = Substitute.For<HubCallerContext>();
         hubCallerContext.ConnectionId.Returns("подключение-1");
@@ -103,5 +105,57 @@ public sealed class ChatHubTests
         await _callerSubstitute.DidNotReceive()
             .ReceiveMessageHistory(Arg.Any<IReadOnlyList<ChatMessageSnapshot>>());
         await _othersInGroupSubstitute.Received(1).ParticipantJoined("Андрей");
+    }
+
+    [Fact]
+    public async Task JoinRoom_ЛюбойВход_ДобавляетПодключениеВГруппуКомнаты()
+    {
+        // Подготовка
+        _messageStoreSubstitute
+            .FindRecentMessagesAsync("general", Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+        var hubUnderTest = CreateHubUnderTest();
+
+        // Действие
+        await hubUnderTest.JoinRoom("general", "Андрей");
+
+        // Проверка: подключение добавлено в группу именно этой комнаты
+        await hubUnderTest.Groups.Received(1)
+            .AddToGroupAsync("подключение-1", "general", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SendMessage_КорректныеДанные_СохраняетСообщениеИРассылаетВКомнату()
+    {
+        // Подготовка
+        var hubUnderTest = CreateHubUnderTest();
+
+        // Действие
+        await hubUnderTest.SendMessage("general", "  Андрей  ", "  Привет!  ");
+
+        // Проверка: сообщение сохранено (с обрезанными пробелами) и разослано всей комнате
+        await _messageStoreSubstitute.Received(1).SaveMessageAsync(
+            Arg.Is<ChatMessage>(message =>
+                message.RoomName == "general"
+                && message.SenderName == "Андрей"
+                && message.Text == "Привет!"),
+            Arg.Any<CancellationToken>());
+        await _groupSubstitute.Received(1).ReceiveMessage(
+            Arg.Any<Guid>(), "Андрей", "Привет!", Arg.Any<DateTimeOffset>());
+    }
+
+    [Fact]
+    public async Task SendMessage_ПустойТекст_ВыбрасываетИНеСохраняет()
+    {
+        // Подготовка
+        var hubUnderTest = CreateHubUnderTest();
+
+        // Действие и проверка: некорректное сообщение не доходит до хранилища и рассылки
+        await Assert.ThrowsAnyAsync<ArgumentException>(
+            () => hubUnderTest.SendMessage("general", "Андрей", "   "));
+        await _messageStoreSubstitute.DidNotReceive()
+            .SaveMessageAsync(Arg.Any<ChatMessage>(), Arg.Any<CancellationToken>());
+        await _groupSubstitute.DidNotReceive().ReceiveMessage(
+            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>());
     }
 }
