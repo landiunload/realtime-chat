@@ -23,8 +23,15 @@ public sealed class ChatDatabaseContext(DbContextOptions<ChatDatabaseContext> co
                 .HasMaxLength(ChatMessage.MaximumTextLength)
                 .IsRequired();
 
-            // Составной индекс под основной сценарий чтения: история конкретной комнаты по времени
-            chatMessageBuilder.HasIndex(chatMessage => new { chatMessage.RoomName, chatMessage.SentAtUtc });
+            // Составной индекс под основной сценарий чтения: история конкретной комнаты
+            // по времени. Идентификатор входит в индекс третьим, чтобы устойчивый
+            // тай-брейк в запросе истории обслуживался индексом, а не досортировкой.
+            chatMessageBuilder.HasIndex(chatMessage => new
+            {
+                chatMessage.RoomName,
+                chatMessage.SentAtUtc,
+                chatMessage.Identifier
+            });
         });
     }
 }

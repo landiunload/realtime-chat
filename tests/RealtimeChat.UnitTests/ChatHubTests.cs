@@ -62,7 +62,7 @@ public sealed class ChatHubTests
         // Проверка: ровно один вызов на всю историю, ни одного поштучного
         await _callerSubstitute.Received(1)
             .ReceiveMessageHistory(Arg.Is<IReadOnlyList<ChatMessageSnapshot>>(
-                history => history.Count == existingMessages.Count));
+                history => history != null && history.Count == existingMessages.Count));
         await _callerSubstitute.DidNotReceive().ReceiveMessage(
             Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>());
     }
@@ -136,7 +136,8 @@ public sealed class ChatHubTests
         // Проверка: сообщение сохранено (с обрезанными пробелами) и разослано всей комнате
         await _messageStoreSubstitute.Received(1).SaveMessageAsync(
             Arg.Is<ChatMessage>(message =>
-                message.RoomName == "general"
+                message != null
+                && message.RoomName == "general"
                 && message.SenderName == "Андрей"
                 && message.Text == "Привет!"),
             Arg.Any<CancellationToken>());

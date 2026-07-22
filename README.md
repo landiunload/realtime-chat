@@ -5,8 +5,8 @@
 
 ## Стек технологий
 
-- **.NET 9 / ASP.NET Core SignalR** — двусторонняя связь по WebSocket с автоматическим fallback
-- **Entity Framework Core 9 + PostgreSQL** — хранение истории сообщений
+- **.NET 10 / ASP.NET Core SignalR** — двусторонняя связь по WebSocket с автоматическим fallback
+- **Entity Framework Core 10 + PostgreSQL** — хранение истории сообщений
 - **Serilog** — структурированное логирование
 - **xUnit + NSubstitute** — модульные тесты
 - **Docker Compose** — локальное окружение
