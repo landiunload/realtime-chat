@@ -80,8 +80,11 @@ public sealed class ChatHub(
     /// <summary>Принимает сообщение, сохраняет его и рассылает всем участникам комнаты.</summary>
     public async Task SendMessage(string roomName, string senderName, string text)
     {
-        // Фабричный метод выбросит исключение при некорректных данных —
-        // SignalR вернёт его вызывающему клиенту
+        // Фабричный метод выбросит исключение при некорректных данных. Клиент при
+        // этом получит обезличенное «An unexpected error occurred», а не текст
+        // исключения: EnableDetailedErrors не включён, и SignalR передаёт наружу
+        // только HubException. Подробности остаются в логе сервера — если клиенту
+        // нужен разбор причины, здесь нужен HubException с безопасной формулировкой.
         var createdMessage = ChatMessage.Create(roomName, senderName, text);
 
         await chatMessageStore.SaveMessageAsync(createdMessage, Context.ConnectionAborted);

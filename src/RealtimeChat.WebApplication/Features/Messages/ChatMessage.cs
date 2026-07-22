@@ -9,6 +9,14 @@ public sealed class ChatMessage
     /// <summary>Максимально допустимая длина текста сообщения.</summary>
     public const int MaximumTextLength = 2000;
 
+    /// <summary>
+    /// Максимально допустимая длина названия комнаты и имени отправителя.
+    /// Значение совпадает с шириной колонок в <c>ChatDatabaseContext</c>: проверка
+    /// здесь и ограничение схемы обязаны сходиться, иначе слишком длинное имя
+    /// проходит фабрику и падает уже на вставке в базу.
+    /// </summary>
+    public const int MaximumNameLength = 64;
+
     /// <summary>Уникальный идентификатор сообщения.</summary>
     public Guid Identifier { get; private set; }
 
@@ -34,20 +42,37 @@ public sealed class ChatMessage
         ArgumentException.ThrowIfNullOrWhiteSpace(senderName);
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
 
-        if (text.Length > MaximumTextLength)
-        {
-            throw new ArgumentException(
-                $"Текст сообщения не может быть длиннее {MaximumTextLength} символов.",
-                nameof(text));
-        }
+        // Пределы проверяются по обрезанным значениям: в базу уезжают именно они,
+        // поэтому окаймляющие пробелы не должны решать судьбу сообщения.
+        var trimmedRoomName = roomName.Trim();
+        var trimmedSenderName = senderName.Trim();
+        var trimmedText = text.Trim();
+
+        EnsureLengthWithinLimit(trimmedRoomName, MaximumNameLength, nameof(roomName), "Название комнаты");
+        EnsureLengthWithinLimit(trimmedSenderName, MaximumNameLength, nameof(senderName), "Имя отправителя");
+        EnsureLengthWithinLimit(trimmedText, MaximumTextLength, nameof(text), "Текст сообщения");
 
         return new ChatMessage
         {
             Identifier = Guid.CreateVersion7(),
-            RoomName = roomName.Trim(),
-            SenderName = senderName.Trim(),
-            Text = text.Trim(),
+            RoomName = trimmedRoomName,
+            SenderName = trimmedSenderName,
+            Text = trimmedText,
             SentAtUtc = DateTimeOffset.UtcNow
         };
+    }
+
+    private static void EnsureLengthWithinLimit(
+        string value,
+        int maximumLength,
+        string parameterName,
+        string subjectDescription)
+    {
+        if (value.Length > maximumLength)
+        {
+            throw new ArgumentException(
+                $"{subjectDescription} не может быть длиннее {maximumLength} символов.",
+                parameterName);
+        }
     }
 }

@@ -70,4 +70,52 @@ public sealed class ChatMessageTests
 
         Assert.Equal("general", createdMessage.RoomName);
     }
+
+    // Длина названия комнаты и имени отправителя ограничена схемой: обе колонки
+    // объявлены varchar(64). Проверок на это в фабрике не было, поэтому длинное
+    // имя доходило до вставки и падало DbUpdateException'ом уже в хранилище —
+    // клиент вместо внятного отказа получал ошибку сервера. Текст с самого начала
+    // проверялся против своего предела, эти два поля просто забыли.
+
+    [Fact]
+    public void Create_СлишкомДлинноеНазваниеКомнаты_ВыбрасываетИсключение()
+    {
+        var roomNameExceedingMaximumLength = new string('к', ChatMessage.MaximumNameLength + 1);
+
+        Assert.Throws<ArgumentException>(
+            () => ChatMessage.Create(roomNameExceedingMaximumLength, "Андрей", "Привет!"));
+    }
+
+    [Fact]
+    public void Create_СлишкомДлинноеИмяОтправителя_ВыбрасываетИсключение()
+    {
+        var senderNameExceedingMaximumLength = new string('и', ChatMessage.MaximumNameLength + 1);
+
+        Assert.Throws<ArgumentException>(
+            () => ChatMessage.Create("general", senderNameExceedingMaximumLength, "Привет!"));
+    }
+
+    [Fact]
+    public void Create_ИменаРовноМаксимальнойДлины_СоздаётСообщение()
+    {
+        // Граница включительно: ровно предел схема принимает, отсекается только «больше»
+        var nameAtMaximumLength = new string('к', ChatMessage.MaximumNameLength);
+
+        var createdMessage = ChatMessage.Create(nameAtMaximumLength, nameAtMaximumLength, "Привет!");
+
+        Assert.Equal(ChatMessage.MaximumNameLength, createdMessage.RoomName.Length);
+        Assert.Equal(ChatMessage.MaximumNameLength, createdMessage.SenderName.Length);
+    }
+
+    [Fact]
+    public void Create_ИмяИзПробеловИДлинногоХвоста_ПроверяетДлинуПослеОбрезки()
+    {
+        // Обрезка идёт до проверки длины: имя, укладывающееся в предел после
+        // отбрасывания пробелов, отвергать не за что — в базу поедет обрезанное
+        var paddedName = "  " + new string('к', ChatMessage.MaximumNameLength) + "  ";
+
+        var createdMessage = ChatMessage.Create(paddedName, "Андрей", "Привет!");
+
+        Assert.Equal(ChatMessage.MaximumNameLength, createdMessage.RoomName.Length);
+    }
 }

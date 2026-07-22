@@ -125,6 +125,39 @@ public sealed class ChatHubTests
     }
 
     [Fact]
+    public async Task JoinRoom_ЛюбойВход_ЗапрашиваетРовноПятьдесятПоследнихСообщений()
+    {
+        // Размер истории — обещание из README, а не деталь реализации. Остальные
+        // тесты передавали Arg.Any<int>(), поэтому подмена 50 на любое другое
+        // число прошла бы мимо них незамеченной.
+        _messageStoreSubstitute
+            .FindRecentMessagesAsync("general", Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        await CreateHubUnderTest().JoinRoom("general", "Андрей");
+
+        await _messageStoreSubstitute.Received(1)
+            .FindRecentMessagesAsync("general", 50, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SendMessage_СлишкомДлинноеИмяОтправителя_ВыбрасываетИНеСохраняет()
+    {
+        // Длина имени ограничена схемой (varchar(64)). До проверки в фабрике
+        // такое сообщение доходило до SaveMessageAsync и падало уже на вставке.
+        var hubUnderTest = CreateHubUnderTest();
+        var tooLongSenderName = new string('и', ChatMessage.MaximumNameLength + 1);
+
+        await Assert.ThrowsAnyAsync<ArgumentException>(
+            () => hubUnderTest.SendMessage("general", tooLongSenderName, "Привет!"));
+
+        await _messageStoreSubstitute.DidNotReceive()
+            .SaveMessageAsync(Arg.Any<ChatMessage>(), Arg.Any<CancellationToken>());
+        await _groupSubstitute.DidNotReceive().ReceiveMessage(
+            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>());
+    }
+
+    [Fact]
     public async Task SendMessage_КорректныеДанные_СохраняетСообщениеИРассылаетВКомнату()
     {
         // Подготовка
