@@ -17,8 +17,12 @@ public sealed class ChatDatabaseContext(DbContextOptions<ChatDatabaseContext> co
         {
             chatMessageBuilder.ToTable("chat_messages");
             chatMessageBuilder.HasKey(chatMessage => chatMessage.Identifier);
-            chatMessageBuilder.Property(chatMessage => chatMessage.RoomName).HasMaxLength(64).IsRequired();
-            chatMessageBuilder.Property(chatMessage => chatMessage.SenderName).HasMaxLength(64).IsRequired();
+            chatMessageBuilder.Property(chatMessage => chatMessage.RoomName)
+                .HasMaxLength(ChatMessage.MaximumNameLength)
+                .IsRequired();
+            chatMessageBuilder.Property(chatMessage => chatMessage.SenderName)
+                .HasMaxLength(ChatMessage.MaximumNameLength)
+                .IsRequired();
             chatMessageBuilder.Property(chatMessage => chatMessage.Text)
                 .HasMaxLength(ChatMessage.MaximumTextLength)
                 .IsRequired();
