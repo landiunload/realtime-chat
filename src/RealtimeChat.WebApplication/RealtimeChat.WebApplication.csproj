@@ -12,6 +12,10 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.10" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <!-- Консольный сток пишет синхронно и держит вызвавший поток. На горячем пути
+         хаба (запись в лог на каждое сообщение) это стоило половины пропускной
+         способности — обёртка Async уносит запись на фоновый поток. -->
+    <PackageReference Include="Serilog.Sinks.Async" Version="2.1.0" />
   </ItemGroup>
 
 </Project>
