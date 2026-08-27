@@ -33,26 +33,47 @@ public interface IChatClient
 /// Строго типизирован (Hub&lt;IChatClient&gt;) — опечатка в имени клиентского метода
 /// становится ошибкой компиляции, а не молчаливым сбоем в продакшене.
 /// </summary>
-public sealed class ChatHub(
+public sealed partial class ChatHub(
     IChatMessageStore chatMessageStore,
     ILogger<ChatHub> logger) : Hub<IChatClient>
 {
+    private static readonly object ParticipantSessionItemKey = new();
     private const int RecentMessagesCountToSendOnJoin = 50;
+
+    private sealed record ParticipantSession(string RoomName, string ParticipantName);
 
     /// <summary>Подключает участника к комнате и отправляет ему последние сообщения.</summary>
     public async Task JoinRoom(string roomName, string participantName)
     {
-        await Groups.AddToGroupAsync(Context.ConnectionId, roomName);
+        var normalizedRoomName = ChatMessage.NormalizeRoomName(roomName);
+        var normalizedParticipantName = ChatMessage.NormalizeSenderName(participantName);
 
-        logger.LogInformation(
-            "Участник {ИмяУчастника} вошёл в комнату {НазваниеКомнаты} (подключение {ИдентификаторПодключения})",
-            participantName,
-            roomName,
+        if (TryGetParticipantSession() is { } previousSession)
+        {
+            Context.Items.Remove(ParticipantSessionItemKey);
+            await Groups.RemoveFromGroupAsync(
+                Context.ConnectionId,
+                previousSession.RoomName,
+                Context.ConnectionAborted);
+        }
+
+        await Groups.AddToGroupAsync(
+            Context.ConnectionId,
+            normalizedRoomName,
+            Context.ConnectionAborted);
+        Context.Items[ParticipantSessionItemKey] = new ParticipantSession(
+            normalizedRoomName,
+            normalizedParticipantName);
+
+        LogParticipantJoined(
+            logger,
+            normalizedParticipantName,
+            normalizedRoomName,
             Context.ConnectionId);
 
         // Новому участнику — история, остальным — уведомление о входе
         var recentMessages = await chatMessageStore.FindRecentMessagesAsync(
-            roomName,
+            normalizedRoomName,
             RecentMessagesCountToSendOnJoin,
             Context.ConnectionAborted);
 
@@ -74,31 +95,59 @@ public sealed class ChatHub(
             await Clients.Caller.ReceiveMessageHistory(messageHistory);
         }
 
-        await Clients.OthersInGroup(roomName).ParticipantJoined(participantName);
+        await Clients.OthersInGroup(normalizedRoomName).ParticipantJoined(normalizedParticipantName);
     }
 
     /// <summary>Принимает сообщение, сохраняет его и рассылает всем участникам комнаты.</summary>
-    public async Task SendMessage(string roomName, string senderName, string text)
+    public async Task SendMessage(string text)
     {
-        // Фабричный метод выбросит исключение при некорректных данных. Клиент при
-        // этом получит обезличенное «An unexpected error occurred», а не текст
-        // исключения: EnableDetailedErrors не включён, и SignalR передаёт наружу
-        // только HubException. Подробности остаются в логе сервера — если клиенту
-        // нужен разбор причины, здесь нужен HubException с безопасной формулировкой.
-        var createdMessage = ChatMessage.Create(roomName, senderName, text);
+        var participantSession = TryGetParticipantSession()
+            ?? throw new HubException("Сначала войдите в комнату.");
+
+        var createdMessage = ChatMessage.Create(
+            participantSession.RoomName,
+            participantSession.ParticipantName,
+            text);
 
         await chatMessageStore.SaveMessageAsync(createdMessage, Context.ConnectionAborted);
 
-        await Clients.Group(roomName).ReceiveMessage(
+        await Clients.Group(participantSession.RoomName).ReceiveMessage(
             createdMessage.Identifier,
             createdMessage.SenderName,
             createdMessage.Text,
             createdMessage.SentAtUtc);
 
-        logger.LogInformation(
-            "Сообщение {ИдентификаторСообщения} от {ИмяОтправителя} доставлено в комнату {НазваниеКомнаты}",
+        // Не пишем каждое сообщение на уровне Information: даже асинхронный
+        // консольный сток создаёт очередь, аллокации и лишний I/O на горячем пути.
+        LogMessageDelivered(
+            logger,
             createdMessage.Identifier,
             createdMessage.SenderName,
-            roomName);
+            participantSession.RoomName);
     }
+
+    private ParticipantSession? TryGetParticipantSession() =>
+        Context.Items.TryGetValue(ParticipantSessionItemKey, out var participantSession)
+            ? participantSession as ParticipantSession
+            : null;
+
+    [LoggerMessage(
+        EventId = 2001,
+        Level = LogLevel.Information,
+        Message = "Участник {ParticipantName} вошёл в комнату {RoomName} (подключение {ConnectionId})")]
+    private static partial void LogParticipantJoined(
+        ILogger logger,
+        string participantName,
+        string roomName,
+        string connectionId);
+
+    [LoggerMessage(
+        EventId = 2002,
+        Level = LogLevel.Debug,
+        Message = "Сообщение {MessageIdentifier} от {SenderName} доставлено в комнату {RoomName}")]
+    private static partial void LogMessageDelivered(
+        ILogger logger,
+        Guid messageIdentifier,
+        string senderName,
+        string roomName);
 }

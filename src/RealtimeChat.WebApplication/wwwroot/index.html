@@ -77,6 +77,8 @@
             padding: 0 4px;
         }
 
+        .connection-label { margin-bottom: 12px; }
+
         .join-form { display: flex; flex-direction: column; gap: 10px; }
 
         .input-group { display: flex; flex-direction: column; gap: 5px; }
@@ -266,6 +268,8 @@
             user-select: none;
         }
 
+        .outgoing .avatar { background: var(--accent-dim); }
+
         .message-body { display: flex; flex-direction: column; gap: 3px; }
 
         .message-bubble {
@@ -325,6 +329,8 @@
             padding: 11px 16px;
             outline: none;
             resize: none;
+            field-sizing: content;
+            min-height: 44px;
             max-height: 120px;
             line-height: 1.5;
             font-family: var(--font);
@@ -376,15 +382,15 @@
         </div>
 
         <div>
-            <div class="sidebar-section-label" style="margin-bottom:12px">Подключение</div>
+            <div class="sidebar-section-label connection-label">Подключение</div>
             <div class="join-form">
                 <div class="input-group">
                     <label class="input-label" for="participant-name-input">Ваше имя</label>
-                    <input class="input-field" id="participant-name-input" type="text" placeholder="Как вас зовут?">
+                    <input class="input-field" id="participant-name-input" type="text" maxlength="64" placeholder="Как вас зовут?">
                 </div>
                 <div class="input-group">
                     <label class="input-label" for="room-name-input">Комната</label>
-                    <input class="input-field" id="room-name-input" type="text" value="general" placeholder="general">
+                    <input class="input-field" id="room-name-input" type="text" maxlength="64" value="general" placeholder="general">
                 </div>
                 <button class="btn-join" id="join-room-button">Войти в комнату</button>
             </div>
@@ -422,7 +428,7 @@
         </div>
 
         <div class="input-bar">
-            <textarea class="message-input" id="message-text-input" placeholder="Напишите сообщение..." rows="1" disabled></textarea>
+            <textarea class="message-input" id="message-text-input" maxlength="2000" placeholder="Напишите сообщение..." rows="1" disabled></textarea>
             <button class="btn-send" id="send-message-button" disabled title="Отправить">
                 <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
             </button>
@@ -431,7 +437,11 @@
 
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
+<script
+    src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/10.0.11/signalr.min.js"
+    integrity="sha512-zV6tEyYm1c6KHVZUHmZUDIM/mWFZ5nHt08kt682k98cvUMAHTyJ0ZQkv2Q+KWIbbwN0wnboWYEvqbOztWwlMpg=="
+    crossorigin="anonymous"
+    referrerpolicy="no-referrer"></script>
 <script>
     const hubConnection = new signalR.HubConnectionBuilder()
         .withUrl("/hubs/chat")
@@ -447,9 +457,13 @@
     const chatRoomSub   = document.getElementById("chat-room-sub");
     const messageInput  = document.getElementById("message-text-input");
     const sendButton    = document.getElementById("send-message-button");
+    const joinButton    = document.getElementById("join-room-button");
 
     let currentName = "";
-    let msgCount = 0;
+    let currentRoom = "";
+    const renderedMessageIdentifiers = new Set();
+    const renderedMessageRows = [];
+    const maximumRenderedMessages = 500;
 
     function setConnected(connected) {
         statusDot.classList.toggle("connected", connected);
@@ -465,9 +479,9 @@
         return new Date(isoOrDate).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" });
     }
 
-    function appendMessage(senderName, text, sentAt) {
-        if (emptyState) emptyState.remove();
-        msgCount++;
+    function appendMessage(identifier, senderName, text, sentAt) {
+        if (identifier && renderedMessageIdentifiers.has(identifier)) return;
+        if (emptyState && emptyState.isConnected) emptyState.remove();
 
         const isOutgoing = senderName === currentName;
         const row = document.createElement("div");
@@ -476,7 +490,6 @@
         const av = document.createElement("div");
         av.className = "avatar";
         av.textContent = avatarLetter(senderName);
-        if (isOutgoing) av.style.background = "var(--accent-dim)";
 
         const body = document.createElement("div");
         body.className = "message-body";
@@ -495,11 +508,22 @@
         row.appendChild(body);
 
         messagesArea.appendChild(row);
+        renderedMessageRows.push({ identifier, row });
+        if (identifier) renderedMessageIdentifiers.add(identifier);
+
+        if (renderedMessageRows.length > maximumRenderedMessages) {
+            const oldestMessage = renderedMessageRows.shift();
+            oldestMessage.row.remove();
+            if (oldestMessage.identifier) {
+                renderedMessageIdentifiers.delete(oldestMessage.identifier);
+            }
+        }
+
         messagesArea.scrollTop = messagesArea.scrollHeight;
     }
 
     function appendSystem(text) {
-        if (emptyState) emptyState.remove();
+        if (emptyState && emptyState.isConnected) emptyState.remove();
         const row = document.createElement("div");
         row.className = "message-row system";
         const pill = document.createElement("div");
@@ -510,13 +534,17 @@
         messagesArea.scrollTop = messagesArea.scrollHeight;
     }
 
-    hubConnection.on("ReceiveMessage", (_, senderName, text, sentAtUtc) =>
-        appendMessage(senderName, text, sentAtUtc));
+    hubConnection.on("ReceiveMessage", (identifier, senderName, text, sentAtUtc) =>
+        appendMessage(identifier, senderName, text, sentAtUtc));
 
     // История комнаты приходит одним пакетом при входе
     hubConnection.on("ReceiveMessageHistory", (recentMessages) => {
         for (const recentMessage of recentMessages) {
-            appendMessage(recentMessage.senderName, recentMessage.text, recentMessage.sentAtUtc);
+            appendMessage(
+                recentMessage.identifier,
+                recentMessage.senderName,
+                recentMessage.text,
+                recentMessage.sentAtUtc);
         }
     });
 
@@ -524,11 +552,23 @@
         appendSystem(`${participantName} вошёл в комнату`));
 
     hubConnection.onreconnecting(() => setConnected(false));
-    hubConnection.onreconnected(() => setConnected(true));
-    hubConnection.onclose(() => setConnected(false));
+    hubConnection.onreconnected(async () => {
+        try {
+            await hubConnection.invoke("JoinRoom", currentRoom, currentName);
+            setConnected(true);
+        } catch (err) {
+            console.error("Не удалось восстановить участие в комнате:", err);
+            appendSystem("Соединение восстановлено, но повторный вход в комнату не удался");
+        }
+    });
+    hubConnection.onclose(() => {
+        setConnected(false);
+        messageInput.disabled = true;
+        sendButton.disabled = true;
+        joinButton.disabled = false;
+    });
 
-    document.getElementById("join-room-button").addEventListener("click", async () => {
-        const joinBtn = document.getElementById("join-room-button");
+    joinButton.addEventListener("click", async () => {
         const participantName = document.getElementById("participant-name-input").value.trim();
         const roomName        = document.getElementById("room-name-input").value.trim();
 
@@ -537,7 +577,7 @@
             return;
         }
 
-        joinBtn.disabled = true;
+        joinButton.disabled = true;
         try {
             if (hubConnection.state === signalR.HubConnectionState.Disconnected) {
                 await hubConnection.start();
@@ -545,6 +585,7 @@
             await hubConnection.invoke("JoinRoom", roomName, participantName);
 
             currentName = participantName;
+            currentRoom = roomName;
             setConnected(true);
             chatRoomName.textContent = "# " + roomName;
             chatRoomSub.textContent  = participantName + " · онлайн";
@@ -552,17 +593,13 @@
             messageInput.disabled = false;
             sendButton.disabled   = false;
             messageInput.focus();
+            joinButton.disabled = false;
+            joinButton.textContent = "Сменить комнату";
         } catch (err) {
             console.error("Не удалось войти в комнату:", err);
             appendSystem("Не удалось подключиться: " + err.message);
-            joinBtn.disabled = false;
+            joinButton.disabled = false;
         }
-    });
-
-    // Auto-resize textarea
-    messageInput.addEventListener("input", () => {
-        messageInput.style.height = "auto";
-        messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + "px";
     });
 
     // Send on Enter (Shift+Enter = new line)
@@ -576,14 +613,12 @@
     sendButton.addEventListener("click", sendMessage);
 
     async function sendMessage() {
-        const roomName = document.getElementById("room-name-input").value.trim();
-        const text     = messageInput.value.trim();
-        if (!text || !roomName) return;
+        const text = messageInput.value.trim();
+        if (!text || hubConnection.state !== signalR.HubConnectionState.Connected) return;
 
         try {
-            await hubConnection.invoke("SendMessage", roomName, currentName, text);
+            await hubConnection.invoke("SendMessage", text);
             messageInput.value = "";
-            messageInput.style.height = "auto";
         } catch (err) {
             console.error("Не удалось отправить сообщение:", err);
             appendSystem("Сообщение не отправлено: " + err.message);

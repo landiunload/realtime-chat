@@ -1,14 +1,13 @@
 # Локальное окружение: PostgreSQL и приложение чата
 services:
   realtime-chat-database:
-    image: postgres:17-alpine
-    container_name: realtime-chat-database
+    image: postgres:17.11-alpine
     environment:
       POSTGRES_DB: realtime_chat
       POSTGRES_USER: realtime_chat_user
-      POSTGRES_PASSWORD: local_development_password
+      POSTGRES_PASSWORD: "${REALTIME_CHAT_DB_PASSWORD:?copy .env.example to .env and set a password}"
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - realtime-chat-database-volume:/var/lib/postgresql/data
     healthcheck:
@@ -21,15 +20,26 @@ services:
     build:
       context: .
       dockerfile: src/RealtimeChat.WebApplication/Dockerfile
-    container_name: realtime-chat-web-application
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
-      ConnectionStrings__ChatDatabase: "Host=realtime-chat-database;Port=5432;Database=realtime_chat;Username=realtime_chat_user;Password=local_development_password"
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__ChatDatabase: "Host=realtime-chat-database;Port=5432;Database=realtime_chat;Username=realtime_chat_user;Password=${REALTIME_CHAT_DB_PASSWORD:?copy .env.example to .env and set a password};GSS Encryption Mode=Disable"
     ports:
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
     depends_on:
       realtime-chat-database:
         condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8080/health/live"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
 volumes:
   realtime-chat-database-volume:

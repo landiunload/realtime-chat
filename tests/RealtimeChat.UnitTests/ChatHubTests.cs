@@ -17,6 +17,7 @@ public sealed class ChatHubTests
     private readonly IChatClient _callerSubstitute = Substitute.For<IChatClient>();
     private readonly IChatClient _othersInGroupSubstitute = Substitute.For<IChatClient>();
     private readonly IChatClient _groupSubstitute = Substitute.For<IChatClient>();
+    private readonly Dictionary<object, object?> _connectionItems = [];
 
     private ChatHub CreateHubUnderTest()
     {
@@ -27,6 +28,8 @@ public sealed class ChatHubTests
 
         var hubCallerContext = Substitute.For<HubCallerContext>();
         hubCallerContext.ConnectionId.Returns("подключение-1");
+        hubCallerContext.Items.Returns(_connectionItems);
+        hubCallerContext.ConnectionAborted.Returns(CancellationToken.None);
 
         return new ChatHub(_messageStoreSubstitute, Substitute.For<ILogger<ChatHub>>())
         {
@@ -36,7 +39,15 @@ public sealed class ChatHubTests
         };
     }
 
-    private static IReadOnlyList<ChatMessage> CreateMessages(int messagesCount)
+    private async Task JoinGeneralRoomAsync(ChatHub hubUnderTest, string participantName = "Андрей")
+    {
+        _messageStoreSubstitute
+            .FindRecentMessagesAsync("general", Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+        await hubUnderTest.JoinRoom("general", participantName);
+    }
+
+    private static List<ChatMessage> CreateMessages(int messagesCount)
     {
         var createdMessages = new List<ChatMessage>(messagesCount);
         for (var messageNumber = 1; messageNumber <= messagesCount; ++messageNumber)
@@ -141,7 +152,7 @@ public sealed class ChatHubTests
     }
 
     [Fact]
-    public async Task SendMessage_СлишкомДлинноеИмяОтправителя_ВыбрасываетИНеСохраняет()
+    public async Task JoinRoom_СлишкомДлинноеИмяУчастника_ВыбрасываетИНеДобавляетВГруппу()
     {
         // Длина имени ограничена схемой (varchar(64)). До проверки в фабрике
         // такое сообщение доходило до SaveMessageAsync и падало уже на вставке.
@@ -149,12 +160,10 @@ public sealed class ChatHubTests
         var tooLongSenderName = new string('и', ChatMessage.MaximumNameLength + 1);
 
         await Assert.ThrowsAnyAsync<ArgumentException>(
-            () => hubUnderTest.SendMessage("general", tooLongSenderName, "Привет!"));
+            () => hubUnderTest.JoinRoom("general", tooLongSenderName));
 
-        await _messageStoreSubstitute.DidNotReceive()
-            .SaveMessageAsync(Arg.Any<ChatMessage>(), Arg.Any<CancellationToken>());
-        await _groupSubstitute.DidNotReceive().ReceiveMessage(
-            Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>());
+        await hubUnderTest.Groups.DidNotReceive().AddToGroupAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -162,9 +171,10 @@ public sealed class ChatHubTests
     {
         // Подготовка
         var hubUnderTest = CreateHubUnderTest();
+        await JoinGeneralRoomAsync(hubUnderTest, "  Андрей  ");
 
         // Действие
-        await hubUnderTest.SendMessage("general", "  Андрей  ", "  Привет!  ");
+        await hubUnderTest.SendMessage("  Привет!  ");
 
         // Проверка: сообщение сохранено (с обрезанными пробелами) и разослано всей комнате
         await _messageStoreSubstitute.Received(1).SaveMessageAsync(
@@ -183,13 +193,44 @@ public sealed class ChatHubTests
     {
         // Подготовка
         var hubUnderTest = CreateHubUnderTest();
+        await JoinGeneralRoomAsync(hubUnderTest);
 
         // Действие и проверка: некорректное сообщение не доходит до хранилища и рассылки
         await Assert.ThrowsAnyAsync<ArgumentException>(
-            () => hubUnderTest.SendMessage("general", "Андрей", "   "));
+            () => hubUnderTest.SendMessage("   "));
         await _messageStoreSubstitute.DidNotReceive()
             .SaveMessageAsync(Arg.Any<ChatMessage>(), Arg.Any<CancellationToken>());
         await _groupSubstitute.DidNotReceive().ReceiveMessage(
             Arg.Any<Guid>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTimeOffset>());
+    }
+
+    [Fact]
+    public async Task SendMessage_ДоВходаВКомнату_ОтказываетИНеСохраняет()
+    {
+        var hubUnderTest = CreateHubUnderTest();
+
+        var thrownException = await Assert.ThrowsAsync<HubException>(
+            () => hubUnderTest.SendMessage("Привет!"));
+
+        Assert.Equal("Сначала войдите в комнату.", thrownException.Message);
+        await _messageStoreSubstitute.DidNotReceive()
+            .SaveMessageAsync(Arg.Any<ChatMessage>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task JoinRoom_СменаКомнаты_УдаляетПодключениеИзПредыдущейГруппы()
+    {
+        var hubUnderTest = CreateHubUnderTest();
+        await JoinGeneralRoomAsync(hubUnderTest);
+        _messageStoreSubstitute
+            .FindRecentMessagesAsync("random", Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        await hubUnderTest.JoinRoom("random", "Андрей");
+
+        await hubUnderTest.Groups.Received(1).RemoveFromGroupAsync(
+            "подключение-1", "general", Arg.Any<CancellationToken>());
+        await hubUnderTest.Groups.Received(1).AddToGroupAsync(
+            "подключение-1", "random", Arg.Any<CancellationToken>());
     }
 }

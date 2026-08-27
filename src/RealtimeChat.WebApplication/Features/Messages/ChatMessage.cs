@@ -38,41 +38,54 @@ public sealed class ChatMessage
     /// <summary>Создаёт сообщение с проверкой корректности входных данных.</summary>
     public static ChatMessage Create(string roomName, string senderName, string text)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(roomName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(senderName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(text);
-
-        // Пределы проверяются по обрезанным значениям: в базу уезжают именно они,
-        // поэтому окаймляющие пробелы не должны решать судьбу сообщения.
-        var trimmedRoomName = roomName.Trim();
-        var trimmedSenderName = senderName.Trim();
-        var trimmedText = text.Trim();
-
-        EnsureLengthWithinLimit(trimmedRoomName, MaximumNameLength, nameof(roomName), "Название комнаты");
-        EnsureLengthWithinLimit(trimmedSenderName, MaximumNameLength, nameof(senderName), "Имя отправителя");
-        EnsureLengthWithinLimit(trimmedText, MaximumTextLength, nameof(text), "Текст сообщения");
+        var normalizedRoomName = NormalizeRoomName(roomName);
+        var normalizedSenderName = NormalizeSenderName(senderName);
+        var normalizedText = NormalizeText(text);
 
         return new ChatMessage
         {
             Identifier = Guid.CreateVersion7(),
-            RoomName = trimmedRoomName,
-            SenderName = trimmedSenderName,
-            Text = trimmedText,
+            RoomName = normalizedRoomName,
+            SenderName = normalizedSenderName,
+            Text = normalizedText,
             SentAtUtc = DateTimeOffset.UtcNow
         };
     }
 
-    private static void EnsureLengthWithinLimit(
+    internal static string NormalizeRoomName(string roomName) => NormalizeRequiredValue(
+        roomName,
+        MaximumNameLength,
+        nameof(roomName),
+        "Название комнаты");
+
+    internal static string NormalizeSenderName(string senderName) => NormalizeRequiredValue(
+        senderName,
+        MaximumNameLength,
+        nameof(senderName),
+        "Имя отправителя");
+
+    private static string NormalizeText(string text) => NormalizeRequiredValue(
+        text,
+        MaximumTextLength,
+        nameof(text),
+        "Текст сообщения");
+
+    private static string NormalizeRequiredValue(
         string value,
         int maximumLength,
         string parameterName,
         string subjectDescription)
     {
-        if (value.Length > maximumLength)
+        ArgumentException.ThrowIfNullOrWhiteSpace(value, parameterName);
+
+        var normalizedValue = value.Trim();
+        if (normalizedValue.Length > maximumLength)
         {
             throw new ArgumentException(
                 $"{subjectDescription} не может быть длиннее {maximumLength} символов.",
                 parameterName);
         }
+
+        return normalizedValue;
     }
 }
